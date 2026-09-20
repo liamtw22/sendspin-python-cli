@@ -14,6 +14,10 @@ from aiohttp import ClientError, web
 from aiosendspin.client import ClientListener, PairingSupport, SendspinClient
 from aiosendspin.models.core import GroupUpdateServerPayload, ServerCommandPayload
 from aiosendspin.models.player import ClientHelloPlayerSupport, SupportedAudioFormat
+from aiosendspin.models.visualizer import (
+    ClientHelloVisualizerSpectrum,
+    ClientHelloVisualizerSupport,
+)
 from aiosendspin_mpris import MPRIS_AVAILABLE, SendspinMpris
 from aiosendspin.models.types import (
     Activity,
@@ -90,9 +94,18 @@ class SendspinDaemon:
     def _create_client(self) -> SendspinClient:
         """Create a new SendspinClient instance."""
         assert self._audio_handler is not None
-        client_roles = [Roles.PLAYER]
-        if MPRIS_AVAILABLE and self._args.use_mpris:
-            client_roles.extend([Roles.METADATA, Roles.CONTROLLER])
+        # COLOR and VISUALIZER so a consumer can drive lights from the
+        # audio, and METADATA and CONTROLLER unconditionally rather than
+        # only when MPRIS is available: this daemon runs on devices with
+        # no session bus, where the condition meant the server was never
+        # asked for its metadata or controller state at all.
+        client_roles = [
+            Roles.PLAYER,
+            Roles.COLOR,
+            Roles.VISUALIZER,
+            Roles.METADATA,
+            Roles.CONTROLLER,
+        ]
 
         supported_formats = detect_supported_audio_formats(self._args.audio_device)
         if self._args.preferred_format is not None:
@@ -108,6 +121,18 @@ class SendspinDaemon:
             device_info=get_device_info(
                 manufacturer=self._args.manufacturer,
                 product_name=self._args.product_name,
+            ),
+            visualizer_support=ClientHelloVisualizerSupport(
+                buffer_capacity=65536,
+                rate_max=30,
+                types=["loudness", "spectrum", "beat", "peak", "f_peak", "pitch"],
+                # Twelve bins because the consumer here is a twelve
+                # segment LED ring; the server does the band mapping so
+                # the device does not have to. mel over 20 Hz to 20 kHz
+                # follows this project's own TUI visualiser.
+                spectrum=ClientHelloVisualizerSpectrum(
+                    n_disp_bins=12, scale="mel", f_min=20, f_max=20000
+                ),
             ),
             player_support=ClientHelloPlayerSupport(
                 supported_formats=supported_formats,
