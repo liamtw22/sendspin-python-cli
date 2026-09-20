@@ -32,6 +32,17 @@ from sendspin.audio_devices import AudioDevice, detect_supported_audio_formats
 from sendspin.audio_connector import AudioStreamHandler
 from sendspin.hooks import run_hook
 from sendspin.settings import ClientSettings
+
+try:
+    # An optional local consumer for the colour and visualiser feeds.
+    # Frames arrive at 30 Hz, so this cannot be a subprocess hook like
+    # the volume and stream ones: it has to live in the process. The
+    # import is guarded so the daemon runs normally where the module is
+    # not installed, which is everywhere except the device it was
+    # written for.
+    import biscuit_sendspin_viz as _visualizer_consumer
+except ImportError:  # pragma: no cover - absent on any normal install
+    _visualizer_consumer = None
 from sendspin.utils import create_task, get_device_info
 
 if TYPE_CHECKING:
@@ -239,6 +250,8 @@ class SendspinDaemon:
         assert self._args.url is not None
         assert self._audio_handler is not None
         client = self._create_client()
+        if _visualizer_consumer is not None:
+            _visualizer_consumer.attach(client)
         self._server_url = self._args.url
         self._attach_client(client)
         await self._connection_loop(self._args.url)
@@ -358,6 +371,8 @@ class SendspinDaemon:
         assert self._settings is not None
 
         client = self._create_client()
+        if _visualizer_consumer is not None:
+            _visualizer_consumer.attach(client)
         attach_task = create_task(client.attach_websocket(ws))
 
         try:
